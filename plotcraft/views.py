@@ -6,8 +6,10 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponseForbidden, HttpResponse
 from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 from django.conf.urls.static import static
+from django.urls import reverse
 import json
 
 import io
@@ -27,6 +29,8 @@ from .forms import (
     UserForm, RegisterForm, ProfileForm, NovelForm, ChapterForm,
     CharacterForm, LocationForm, ItemForm, SceneForm, TimelineForm, EventForm
 )
+
+from .rag_service import rag_service
 
 
 # ==================== AUTHENTICATION & PROFILE (from myapp) ====================
@@ -557,13 +561,20 @@ def scene_create(request):
             obj = form.save(commit=False)
             obj.created_by = request.user
             obj.save()
-            form.save_m2m()
-            messages.success(request, f"สร้างฉาก '{obj.title}' เรียบร้อย")
-            return redirect(f"/plotcraft/scenes/?project={obj.project.id}")
+            form.save_m2m() # สำคัญมากสำหรับ ManyToMany
+            
+            messages.success(request, f"สร้างฉาก '{obj.title}' เรียบร้อย เริ่มร่างเนื้อหาด้วย AI ได้เลย!")
+            
+            # ✅ แก้ตรงนี้ 1: สร้างเสร็จ ให้เด้งไปหน้า Edit ของฉากนั้นทันที
+            return redirect('plotcraft:scene_edit', pk=obj.pk) 
+            
     else:
+        # (ส่วน GET เหมือนเดิม)
         initial = {}
         if 'project' in request.GET:
-            pass
+             # แนะนำให้ดึง project_id มาใส่ initial ไว้เลย ถ้าทำได้
+             # initial['project'] = request.GET.get('project') 
+             pass
         form = SceneForm(request.user, initial=initial)
 
     return render(request, 'scenes/scene_form.html', {'form': form})
@@ -578,22 +589,27 @@ def scene_edit(request, pk):
         return redirect('plotcraft:scene_list')
 
     if request.method == 'POST':
+        # 1. ✅ เก็บ ID นิยายไว้ก่อนลบ (สำคัญ! ต้องทำก่อน delete)
         project_id = scene.project.id if scene.project else None
         
         if "scene_delete" in request.POST:
             scene.delete()
             messages.success(request, "ลบฉากเรียบร้อย")
-            if project_id:
-                return redirect(f"/plotcraft/scenes/?project={project_id}")
-            return redirect('plotcraft:scene_list')
 
+            # 2. ✅ สร้าง URL แบบ Dynamic (ปลอดภัยกว่า Hardcode)
+            target_url = reverse('plotcraft:scene_list')
+            if project_id:
+                target_url += f"?project={project_id}"
+            
+            return redirect(target_url)
+
+        # --- ส่วนบันทึกข้อมูล (เหมือนเดิม) ---
         form = SceneForm(request.user, request.POST, instance=scene)
         if form.is_valid():
             form.save()
-            messages.success(request, "บันทึกฉากเรียบร้อย")
-            if scene.project:
-                return redirect(f"/plotcraft/scenes/?project={scene.project.id}")
-            return redirect('plotcraft:scene_list')
+            messages.success(request, "บันทึกข้อมูลแล้ว กดปุ่ม AI เพื่อร่างเนื้อหาต่อได้เลย")
+            return redirect('plotcraft:scene_edit', pk=scene.pk)
+
     else:
         form = SceneForm(request.user, instance=scene)
 
@@ -723,3 +739,48 @@ def timeline_event_delete(request, pk):
     
     return render(request, 'timeline/event_confirm_delete.html', {'event': event})
 
+
+# ==================== RAG SERVICE INTEGRATION ====================
+
+@csrf_exempt
+@login_required
+def ai_generate_scene(request, scene_id):
+    """ API สำหรับกดปุ่ม 'Generate Draft' """
+    if request.method == "POST":
+        # 1. ดึงข้อมูล Scene มา (ต้องเป็นเจ้าของเท่านั้น)
+        # หมายเหตุ: ใน models.py ของคุณ Scene ไม่ได้ผูกกับ User โดยตรง แต่ผูกผ่าน Project -> Owner
+        # ดังนั้นต้องเช็คผ่าน project__owner
+        scene = get_object_or_404(Scene, pk=scene_id, project__author=request.user)
+        
+        # 2. เรียก AI ให้ร่างให้
+        draft_content = rag_service.generate_scene_draft(scene)
+        
+        # 3. ส่งเนื้อหากลับไป
+        try:
+             draft_content = rag_service.generate_scene_draft(scene)
+             return JsonResponse({'draft': draft_content})
+        except Exception as e:
+             return JsonResponse({'error': str(e)}, status=500)
+
+    return JsonResponse({'error': 'Invalid method'}, status=405)
+
+@csrf_exempt
+@login_required
+def ai_chat_general(request):
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            user_message = data.get('message', '')
+            novel_id = data.get('novel_id')
+            
+            reply = rag_service.chat_with_editor(
+                user_message, 
+                novel_id=novel_id, 
+                user_id=request.user.id
+            )
+            
+            return JsonResponse({'reply': reply})
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+    
+    return JsonResponse({'error': 'Method not allowed'}, status=405)

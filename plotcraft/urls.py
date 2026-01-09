@@ -62,4 +62,8 @@ urlpatterns = [
     path('timeline/event/<int:pk>/update/', views.timeline_event_update, name='timeline_event_update'),
     path('timeline/event/<int:pk>/delete/', views.timeline_event_delete, name='timeline_event_delete'),
     path('timeline/reorder/', views.update_event_order, name='update_event_order'),
+
+    # ==================== RAG-ASSISTED WRITING ====================
+    path('api/chat/general/', views.ai_chat_general, name='ai_chat_general'),
+    path('api/generate-scene/<int:scene_id>/', views.ai_generate_scene, name='ai_generate_scene'),
 ]

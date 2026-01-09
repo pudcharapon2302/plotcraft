@@ -5,6 +5,7 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /code
 
+# 1. ติดตั้ง Dependencies (รวม curl และ git ที่จำเป็นสำหรับบาง Lib)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
@@ -17,7 +18,7 @@ RUN apt-get update \
         pkg-config \
         netcat-openbsd \
         curl \
-        # --- ปรับปรุงแพ็กเกจสำหรับ WeasyPrint ใน Debian Trixie/Testing ---
+        git \ 
         shared-mime-info \
         libpango-1.0-0 \
         libharfbuzz0b \
@@ -34,9 +35,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . /code/
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 
-# Build Tailwind CSS inside the image (theme static_src)
+# ✅ แก้ปัญหา Line Endings (Windows -> Linux) ที่ทำให้เกิด Error 255
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
+
+# Build Tailwind (ถ้ามี)
 RUN if [ -d /code/theme/static_src ]; then \
             cd /code/theme/static_src && npm install --no-audit --no-fund && npm run build || true; \
         fi

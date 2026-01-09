@@ -77,6 +77,13 @@
             <div class="mb-8">
                 <label class="block font-bold text-sm mb-1">เนื้อหา / บทร่าง</label>
                 {{ form.content }}
+
+                <button type="button" onclick="generateDraft()" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">
+                    ✨ ให้ AI ร่างฉากนี้
+                </button>
+                <div id="loading" style="display:none;" class="text-gray-500 mt-2">
+                    ⏳ AI กำลังปั่นงานให้คุณ ใจเย็นๆ นะครับ...
+                </div>
             </div>
 
             <div class="flex gap-3 pt-4 border-t border-[#FAEBD7]">
@@ -89,5 +96,47 @@
             </div>
         </form>
     </div>
+    
 </div>
+
+<script>
+function generateDraft() {
+    const sceneId = "{{ scene.id }}"; // Django Template Tag ดึง ID ฉากปัจจุบัน
+    const loadingDiv = document.getElementById('loading');
+    const contentArea = document.getElementById('id_content');
+
+    if (!sceneId) {
+        alert("กรุณาบันทึกฉาก (Save) อย่างน้อย 1 ครั้งก่อนสั่ง AI ครับ");
+        return;
+    }
+
+    if (confirm("AI จะร่างเนื้อหาใหม่ทับลงในช่องเนื้อหา ยืนยันไหมครับ?")) {
+        loadingDiv.style.display = 'block';
+        
+        fetch(`/api/generate-scene/${sceneId}/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}', // สำคัญมากสำหรับ Django POST
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            loadingDiv.style.display = 'none';
+            if (data.draft) {
+                // พิมพ์ทีละตัวอักษรให้ดูเท่ๆ (Optional) หรือใส่ตูมเดียวก็ได้
+                contentArea.value = data.draft; 
+                alert("ร่างเสร็จแล้ว! อย่าลืมเกลาต่อนะครับ");
+            } else {
+                alert("เกิดข้อผิดพลาด: " + data.error);
+            }
+        })
+        .catch(error => {
+            loadingDiv.style.display = 'none';
+            alert("เชื่อมต่อไม่ได้: " + error);
+        });
+    }
+}
+</script>
+
 {% endblock %}
